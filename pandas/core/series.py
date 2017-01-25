@@ -55,7 +55,6 @@ from pandas.tseries.index import DatetimeIndex
 from pandas.tseries.tdi import TimedeltaIndex
 from pandas.tseries.period import PeriodIndex
 from pandas import compat
-from pandas.util.terminal import get_terminal_size
 from pandas.compat import zip, u, OrderedDict, StringIO
 from pandas.compat.numpy import function as nv
 
@@ -1009,7 +1008,7 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
         py2/py3.
         """
         buf = StringIO(u(""))
-        width, height = get_terminal_size()
+        width, height = fmt.get_console_size()
         max_rows = (height if get_option("display.max_rows") == 0 else
                     get_option("display.max_rows"))
 
