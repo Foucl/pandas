@@ -3,15 +3,13 @@
 
 import numpy as np
 import pandas as pd
-import pandas.lib as lib
+import pandas._libs.lib as lib
 import pandas.util.testing as tm
 
 from .common import TestData
 
 
 class TestSeriesReplace(TestData, tm.TestCase):
-
-    _multiprocess_can_split_ = True
 
     def test_replace(self):
         N = 100
@@ -223,3 +221,9 @@ class TestSeriesReplace(TestData, tm.TestCase):
         self.assertTrue((ser[:5] == -1).all())
         self.assertTrue((ser[6:10] == -1).all())
         self.assertTrue((ser[20:30] == -1).all())
+
+    def test_replace_with_empty_dictlike(self):
+        # GH 15289
+        s = pd.Series(list('abcd'))
+        tm.assert_series_equal(s, s.replace(dict()))
+        tm.assert_series_equal(s, s.replace(pd.Series([])))

@@ -10,17 +10,16 @@ from pandas import Series, Categorical, CategoricalIndex, Index
 import pandas as pd
 
 from pandas import compat
-import pandas.algos as _algos
+from pandas._libs import algos as libalgos, hashtable
+from pandas._libs.hashtable import unique_label_indices
 from pandas.compat import lrange
 import pandas.core.algorithms as algos
 import pandas.util.testing as tm
-import pandas.hashtable as hashtable
 from pandas.compat.numpy import np_array_datetime64_compat
 from pandas.util.testing import assert_almost_equal
 
 
 class TestMatch(tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def test_ints(self):
         values = np.array([0, 2, 1])
@@ -57,7 +56,6 @@ class TestMatch(tm.TestCase):
 
 
 class TestSafeSort(tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def test_basic_sort(self):
         values = [3, 1, 2, 0, 4]
@@ -144,7 +142,6 @@ class TestSafeSort(tm.TestCase):
 
 
 class TestFactorize(tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def test_basic(self):
 
@@ -306,7 +303,6 @@ class TestFactorize(tm.TestCase):
 
 
 class TestUnique(tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def test_ints(self):
         arr = np.random.randint(0, 100, size=50)
@@ -389,7 +385,6 @@ class TestUnique(tm.TestCase):
 
 
 class TestIsin(tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def test_invalid(self):
 
@@ -472,7 +467,6 @@ class TestIsin(tm.TestCase):
 
 
 class TestValueCounts(tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def test_value_counts(self):
         np.random.seed(1234)
@@ -658,8 +652,6 @@ class TestValueCounts(tm.TestCase):
 
 
 class TestDuplicated(tm.TestCase):
-
-    _multiprocess_can_split_ = True
 
     def test_duplicated_with_nas(self):
         keys = np.array([0, 1, np.nan, 0, 2, np.nan], dtype=object)
@@ -896,7 +888,6 @@ class GroupVarTestMixin(object):
 
 class TestGroupVarFloat64(tm.TestCase, GroupVarTestMixin):
     __test__ = True
-    _multiprocess_can_split_ = True
 
     algo = algos.algos.group_var_float64
     dtype = np.float64
@@ -920,7 +911,6 @@ class TestGroupVarFloat64(tm.TestCase, GroupVarTestMixin):
 
 class TestGroupVarFloat32(tm.TestCase, GroupVarTestMixin):
     __test__ = True
-    _multiprocess_can_split_ = True
 
     algo = algos.algos.group_var_float32
     dtype = np.float32
@@ -982,7 +972,6 @@ def test_quantile():
 
 
 def test_unique_label_indices():
-    from pandas.hashtable import unique_label_indices
 
     a = np.random.randint(1, 1 << 10, 1 << 15).astype('i8')
 
@@ -1008,7 +997,7 @@ class TestRank(tm.TestCase):
         def _check(arr):
             mask = ~np.isfinite(arr)
             arr = arr.copy()
-            result = _algos.rank_1d_float64(arr)
+            result = libalgos.rank_1d_float64(arr)
             arr[mask] = np.inf
             exp = rankdata(arr)
             exp[mask] = nan
@@ -1044,31 +1033,30 @@ def test_pad_backfill_object_segfault():
     old = np.array([], dtype='O')
     new = np.array([datetime(2010, 12, 31)], dtype='O')
 
-    result = _algos.pad_object(old, new)
+    result = libalgos.pad_object(old, new)
     expected = np.array([-1], dtype=np.int64)
     assert (np.array_equal(result, expected))
 
-    result = _algos.pad_object(new, old)
+    result = libalgos.pad_object(new, old)
     expected = np.array([], dtype=np.int64)
     assert (np.array_equal(result, expected))
 
-    result = _algos.backfill_object(old, new)
+    result = libalgos.backfill_object(old, new)
     expected = np.array([-1], dtype=np.int64)
     assert (np.array_equal(result, expected))
 
-    result = _algos.backfill_object(new, old)
+    result = libalgos.backfill_object(new, old)
     expected = np.array([], dtype=np.int64)
     assert (np.array_equal(result, expected))
 
 
 def test_arrmap():
     values = np.array(['foo', 'foo', 'bar', 'bar', 'baz', 'qux'], dtype='O')
-    result = _algos.arrmap_object(values, lambda x: x in ['foo', 'bar'])
+    result = libalgos.arrmap_object(values, lambda x: x in ['foo', 'bar'])
     assert (result.dtype == np.bool_)
 
 
 class TestTseriesUtil(tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def test_combineFunc(self):
         pass
@@ -1089,7 +1077,7 @@ class TestTseriesUtil(tm.TestCase):
         old = Index([1, 5, 10])
         new = Index(lrange(12))
 
-        filler = _algos.backfill_int64(old.values, new.values)
+        filler = libalgos.backfill_int64(old.values, new.values)
 
         expect_filler = np.array([0, 0, 1, 1, 1, 1,
                                   2, 2, 2, 2, 2, -1], dtype=np.int64)
@@ -1098,7 +1086,7 @@ class TestTseriesUtil(tm.TestCase):
         # corner case
         old = Index([1, 4])
         new = Index(lrange(5, 10))
-        filler = _algos.backfill_int64(old.values, new.values)
+        filler = libalgos.backfill_int64(old.values, new.values)
 
         expect_filler = np.array([-1, -1, -1, -1, -1], dtype=np.int64)
         self.assert_numpy_array_equal(filler, expect_filler)
@@ -1107,7 +1095,7 @@ class TestTseriesUtil(tm.TestCase):
         old = Index([1, 5, 10])
         new = Index(lrange(12))
 
-        filler = _algos.pad_int64(old.values, new.values)
+        filler = libalgos.pad_int64(old.values, new.values)
 
         expect_filler = np.array([-1, 0, 0, 0, 0, 1,
                                   1, 1, 1, 1, 2, 2], dtype=np.int64)
@@ -1116,7 +1104,7 @@ class TestTseriesUtil(tm.TestCase):
         # corner case
         old = Index([5, 10])
         new = Index(lrange(5))
-        filler = _algos.pad_int64(old.values, new.values)
+        filler = libalgos.pad_int64(old.values, new.values)
         expect_filler = np.array([-1, -1, -1, -1, -1], dtype=np.int64)
         self.assert_numpy_array_equal(filler, expect_filler)
 
@@ -1148,7 +1136,7 @@ def test_is_lexsorted():
                   6, 5,
                   4, 3, 2, 1, 0])]
 
-    assert (not _algos.is_lexsorted(failure))
+    assert (not libalgos.is_lexsorted(failure))
 
 # def test_get_group_index():
 #     a = np.array([0, 1, 2, 0, 2, 1, 0, 0], dtype=np.int64)
@@ -1164,7 +1152,7 @@ def test_groupsort_indexer():
     a = np.random.randint(0, 1000, 100).astype(np.int64)
     b = np.random.randint(0, 1000, 100).astype(np.int64)
 
-    result = _algos.groupsort_indexer(a, 1000)[0]
+    result = libalgos.groupsort_indexer(a, 1000)[0]
 
     # need to use a stable sort
     expected = np.argsort(a, kind='mergesort')
@@ -1172,7 +1160,7 @@ def test_groupsort_indexer():
 
     # compare with lexsort
     key = a * 1000 + b
-    result = _algos.groupsort_indexer(key, 1000000)[0]
+    result = libalgos.groupsort_indexer(key, 1000000)[0]
     expected = np.lexsort((b, a))
     assert (np.array_equal(result, expected))
 
@@ -1183,8 +1171,8 @@ def test_infinity_sort():
     # itself.  Instead, let's give our infinities a self-consistent
     # ordering, but outside the float extended real line.
 
-    Inf = _algos.Infinity()
-    NegInf = _algos.NegInfinity()
+    Inf = libalgos.Infinity()
+    NegInf = libalgos.NegInfinity()
 
     ref_nums = [NegInf, float("-inf"), -1e100, 0, 1e100, float("inf"), Inf]
 
@@ -1202,14 +1190,14 @@ def test_infinity_sort():
         assert sorted(perm) == ref_nums
 
     # smoke tests
-    np.array([_algos.Infinity()] * 32).argsort()
-    np.array([_algos.NegInfinity()] * 32).argsort()
+    np.array([libalgos.Infinity()] * 32).argsort()
+    np.array([libalgos.NegInfinity()] * 32).argsort()
 
 
 def test_ensure_platform_int():
     arr = np.arange(100, dtype=np.intp)
 
-    result = _algos.ensure_platform_int(arr)
+    result = libalgos.ensure_platform_int(arr)
     assert (result is arr)
 
 
@@ -1372,9 +1360,3 @@ class TestMode(tm.TestCase):
         idx = Index(['1 day', '1 day', '-1 day', '-1 day 2 min',
                      '2 min', '2 min'], dtype='timedelta64[ns]')
         tm.assert_series_equal(algos.mode(idx), exp)
-
-
-if __name__ == '__main__':
-    import nose
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

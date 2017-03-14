@@ -2,7 +2,7 @@
 from datetime import datetime
 from pandas.compat import range, lrange
 import operator
-import nose
+import pytest
 
 import numpy as np
 
@@ -28,8 +28,6 @@ def add_nans(panel4d):
 
 
 class SafeForLongAndSparse(object):
-
-    _multiprocess_can_split_ = True
 
     def test_repr(self):
         repr(self.panel4d)
@@ -68,7 +66,7 @@ class SafeForLongAndSparse(object):
         try:
             from scipy.stats import skew
         except ImportError:
-            raise nose.SkipTest("no scipy.stats.skew")
+            pytest.skip("no scipy.stats.skew")
 
         def this_skew(x):
             if len(x) < 3:
@@ -147,8 +145,6 @@ class SafeForLongAndSparse(object):
 
 
 class SafeForSparse(object):
-
-    _multiprocess_can_split_ = True
 
     @classmethod
     def assert_panel_equal(cls, x, y):
@@ -304,8 +300,6 @@ class SafeForSparse(object):
 
 
 class CheckIndexing(object):
-
-    _multiprocess_can_split_ = True
 
     def test_getitem(self):
         self.assertRaises(Exception, self.panel4d.__getitem__, 'ItemQ')
@@ -604,8 +598,6 @@ class CheckIndexing(object):
 class TestPanel4d(tm.TestCase, CheckIndexing, SafeForSparse,
                   SafeForLongAndSparse):
 
-    _multiprocess_can_split_ = True
-
     @classmethod
     def assert_panel4d_equal(cls, x, y):
         assert_panel4d_equal(x, y)
@@ -685,7 +677,7 @@ class TestPanel4d(tm.TestCase, CheckIndexing, SafeForSparse,
             self.panel4d['foo'] = 1.
             self.assertFalse(self.panel4d._data.is_consolidated())
 
-            panel4d = self.panel4d.consolidate()
+            panel4d = self.panel4d._consolidate()
             self.assertTrue(panel4d._data.is_consolidated())
 
     def test_ctor_dict(self):
@@ -949,8 +941,3 @@ class TestPanel4d(tm.TestCase, CheckIndexing, SafeForSparse,
 
     def test_get_attr(self):
         assert_panel_equal(self.panel4d['l1'], self.panel4d.l1)
-
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

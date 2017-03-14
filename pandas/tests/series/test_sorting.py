@@ -13,8 +13,6 @@ from .common import TestData
 
 class TestSeriesSorting(TestData, tm.TestCase):
 
-    _multiprocess_can_split_ = True
-
     def test_sort(self):
 
         ts = self.ts.copy()
@@ -65,6 +63,25 @@ class TestSeriesSorting(TestData, tm.TestCase):
         assert_almost_equal(expected, ordered.valid().values)
         ordered = ts.sort_values(ascending=False, na_position='first')
         assert_almost_equal(expected, ordered.valid().values)
+
+        # ascending=[False] should behave the same as ascending=False
+        ordered = ts.sort_values(ascending=[False])
+        expected = ts.sort_values(ascending=False)
+        assert_series_equal(expected, ordered)
+        ordered = ts.sort_values(ascending=[False], na_position='first')
+        expected = ts.sort_values(ascending=False, na_position='first')
+        assert_series_equal(expected, ordered)
+
+        self.assertRaises(ValueError,
+                          lambda: ts.sort_values(ascending=None))
+        self.assertRaises(ValueError,
+                          lambda: ts.sort_values(ascending=[]))
+        self.assertRaises(ValueError,
+                          lambda: ts.sort_values(ascending=[1, 2, 3]))
+        self.assertRaises(ValueError,
+                          lambda: ts.sort_values(ascending=[False, False]))
+        self.assertRaises(ValueError,
+                          lambda: ts.sort_values(ascending='foobar'))
 
         # inplace=True
         ts = self.ts.copy()

@@ -2,10 +2,10 @@
 
 from __future__ import print_function
 
-from datetime import timedelta, datetime
+from datetime import timedelta
 from distutils.version import LooseVersion
 import sys
-import nose
+import pytest
 
 from numpy import nan
 from numpy.random import randn
@@ -24,8 +24,6 @@ from pandas.tests.frame.common import TestData
 
 
 class TestDataFrameAnalytics(tm.TestCase, TestData):
-
-    _multiprocess_can_split_ = True
 
     # ---------------------------------------------------------------------=
     # Correlation and covariance
@@ -119,6 +117,15 @@ class TestDataFrameAnalytics(tm.TestCase, TestData):
                              'a', 'b'], columns=['a', 'b'])
         for meth in ['pearson', 'kendall', 'spearman']:
             tm.assert_frame_equal(df.corr(meth), expected)
+
+    def test_corr_cov_independent_index_column(self):
+        # GH 14617
+        df = pd.DataFrame(np.random.randn(4 * 10).reshape(10, 4),
+                          columns=list("abcd"))
+        for method in ['cov', 'corr']:
+            result = getattr(df, method)()
+            assert result.index is not result.columns
+            assert result.index.equals(result.columns)
 
     def test_cov(self):
         # min_periods no NAs (corner case)
@@ -634,173 +641,6 @@ class TestDataFrameAnalytics(tm.TestCase, TestData):
         df = self.tsframe.fillna(0).astype(np.int32)
         df.cumprod(0)
         df.cumprod(1)
-
-    def test_rank(self):
-        tm._skip_if_no_scipy()
-        from scipy.stats import rankdata
-
-        self.frame['A'][::2] = np.nan
-        self.frame['B'][::3] = np.nan
-        self.frame['C'][::4] = np.nan
-        self.frame['D'][::5] = np.nan
-
-        ranks0 = self.frame.rank()
-        ranks1 = self.frame.rank(1)
-        mask = np.isnan(self.frame.values)
-
-        fvals = self.frame.fillna(np.inf).values
-
-        exp0 = np.apply_along_axis(rankdata, 0, fvals)
-        exp0[mask] = np.nan
-
-        exp1 = np.apply_along_axis(rankdata, 1, fvals)
-        exp1[mask] = np.nan
-
-        tm.assert_almost_equal(ranks0.values, exp0)
-        tm.assert_almost_equal(ranks1.values, exp1)
-
-        # integers
-        df = DataFrame(np.random.randint(0, 5, size=40).reshape((10, 4)))
-
-        result = df.rank()
-        exp = df.astype(float).rank()
-        tm.assert_frame_equal(result, exp)
-
-        result = df.rank(1)
-        exp = df.astype(float).rank(1)
-        tm.assert_frame_equal(result, exp)
-
-    def test_rank2(self):
-        df = DataFrame([[1, 3, 2], [1, 2, 3]])
-        expected = DataFrame([[1.0, 3.0, 2.0], [1, 2, 3]]) / 3.0
-        result = df.rank(1, pct=True)
-        tm.assert_frame_equal(result, expected)
-
-        df = DataFrame([[1, 3, 2], [1, 2, 3]])
-        expected = df.rank(0) / 2.0
-        result = df.rank(0, pct=True)
-        tm.assert_frame_equal(result, expected)
-
-        df = DataFrame([['b', 'c', 'a'], ['a', 'c', 'b']])
-        expected = DataFrame([[2.0, 3.0, 1.0], [1, 3, 2]])
-        result = df.rank(1, numeric_only=False)
-        tm.assert_frame_equal(result, expected)
-
-        expected = DataFrame([[2.0, 1.5, 1.0], [1, 1.5, 2]])
-        result = df.rank(0, numeric_only=False)
-        tm.assert_frame_equal(result, expected)
-
-        df = DataFrame([['b', np.nan, 'a'], ['a', 'c', 'b']])
-        expected = DataFrame([[2.0, nan, 1.0], [1.0, 3.0, 2.0]])
-        result = df.rank(1, numeric_only=False)
-        tm.assert_frame_equal(result, expected)
-
-        expected = DataFrame([[2.0, nan, 1.0], [1.0, 1.0, 2.0]])
-        result = df.rank(0, numeric_only=False)
-        tm.assert_frame_equal(result, expected)
-
-        # f7u12, this does not work without extensive workaround
-        data = [[datetime(2001, 1, 5), nan, datetime(2001, 1, 2)],
-                [datetime(2000, 1, 2), datetime(2000, 1, 3),
-                 datetime(2000, 1, 1)]]
-        df = DataFrame(data)
-
-        # check the rank
-        expected = DataFrame([[2., nan, 1.],
-                              [2., 3., 1.]])
-        result = df.rank(1, numeric_only=False, ascending=True)
-        tm.assert_frame_equal(result, expected)
-
-        expected = DataFrame([[1., nan, 2.],
-                              [2., 1., 3.]])
-        result = df.rank(1, numeric_only=False, ascending=False)
-        tm.assert_frame_equal(result, expected)
-
-        # mixed-type frames
-        self.mixed_frame['datetime'] = datetime.now()
-        self.mixed_frame['timedelta'] = timedelta(days=1, seconds=1)
-
-        result = self.mixed_frame.rank(1)
-        expected = self.mixed_frame.rank(1, numeric_only=True)
-        tm.assert_frame_equal(result, expected)
-
-        df = DataFrame({"a": [1e-20, -5, 1e-20 + 1e-40, 10,
-                              1e60, 1e80, 1e-30]})
-        exp = DataFrame({"a": [3.5, 1., 3.5, 5., 6., 7., 2.]})
-        tm.assert_frame_equal(df.rank(), exp)
-
-    def test_rank_na_option(self):
-        tm._skip_if_no_scipy()
-        from scipy.stats import rankdata
-
-        self.frame['A'][::2] = np.nan
-        self.frame['B'][::3] = np.nan
-        self.frame['C'][::4] = np.nan
-        self.frame['D'][::5] = np.nan
-
-        # bottom
-        ranks0 = self.frame.rank(na_option='bottom')
-        ranks1 = self.frame.rank(1, na_option='bottom')
-
-        fvals = self.frame.fillna(np.inf).values
-
-        exp0 = np.apply_along_axis(rankdata, 0, fvals)
-        exp1 = np.apply_along_axis(rankdata, 1, fvals)
-
-        tm.assert_almost_equal(ranks0.values, exp0)
-        tm.assert_almost_equal(ranks1.values, exp1)
-
-        # top
-        ranks0 = self.frame.rank(na_option='top')
-        ranks1 = self.frame.rank(1, na_option='top')
-
-        fval0 = self.frame.fillna((self.frame.min() - 1).to_dict()).values
-        fval1 = self.frame.T
-        fval1 = fval1.fillna((fval1.min() - 1).to_dict()).T
-        fval1 = fval1.fillna(np.inf).values
-
-        exp0 = np.apply_along_axis(rankdata, 0, fval0)
-        exp1 = np.apply_along_axis(rankdata, 1, fval1)
-
-        tm.assert_almost_equal(ranks0.values, exp0)
-        tm.assert_almost_equal(ranks1.values, exp1)
-
-        # descending
-
-        # bottom
-        ranks0 = self.frame.rank(na_option='top', ascending=False)
-        ranks1 = self.frame.rank(1, na_option='top', ascending=False)
-
-        fvals = self.frame.fillna(np.inf).values
-
-        exp0 = np.apply_along_axis(rankdata, 0, -fvals)
-        exp1 = np.apply_along_axis(rankdata, 1, -fvals)
-
-        tm.assert_almost_equal(ranks0.values, exp0)
-        tm.assert_almost_equal(ranks1.values, exp1)
-
-        # descending
-
-        # top
-        ranks0 = self.frame.rank(na_option='bottom', ascending=False)
-        ranks1 = self.frame.rank(1, na_option='bottom', ascending=False)
-
-        fval0 = self.frame.fillna((self.frame.min() - 1).to_dict()).values
-        fval1 = self.frame.T
-        fval1 = fval1.fillna((fval1.min() - 1).to_dict()).T
-        fval1 = fval1.fillna(np.inf).values
-
-        exp0 = np.apply_along_axis(rankdata, 0, -fval0)
-        exp1 = np.apply_along_axis(rankdata, 1, -fval1)
-
-        tm.assert_numpy_array_equal(ranks0.values, exp0)
-        tm.assert_numpy_array_equal(ranks1.values, exp1)
-
-    def test_rank_axis(self):
-        # check if using axes' names gives the same result
-        df = pd.DataFrame([[2, 1], [4, 3]])
-        tm.assert_frame_equal(df.rank(axis=0), df.rank(axis='index'))
-        tm.assert_frame_equal(df.rank(axis=1), df.rank(axis='columns'))
 
     def test_sem(self):
         alt = lambda x: np.std(x, ddof=1) / np.sqrt(len(x))
@@ -1495,6 +1335,27 @@ class TestDataFrameAnalytics(tm.TestCase, TestData):
         result = df1.isin(df2)
         tm.assert_frame_equal(result, expected)
 
+    def test_isin_empty_datetimelike(self):
+        # GH 15473
+        df1_ts = DataFrame({'date':
+                            pd.to_datetime(['2014-01-01', '2014-01-02'])})
+        df1_td = DataFrame({'date':
+                            [pd.Timedelta(1, 's'), pd.Timedelta(2, 's')]})
+        df2 = DataFrame({'date': []})
+        df3 = DataFrame()
+
+        expected = DataFrame({'date': [False, False]})
+
+        result = df1_ts.isin(df2)
+        tm.assert_frame_equal(result, expected)
+        result = df1_ts.isin(df3)
+        tm.assert_frame_equal(result, expected)
+
+        result = df1_td.isin(df2)
+        tm.assert_frame_equal(result, expected)
+        result = df1_td.isin(df3)
+        tm.assert_frame_equal(result, expected)
+
     # ----------------------------------------------------------------------
     # Row deduplication
 
@@ -2068,8 +1929,8 @@ class TestDataFrameAnalytics(tm.TestCase, TestData):
 
     def test_built_in_round(self):
         if not compat.PY3:
-            raise nose.SkipTest("build in round cannot be overriden "
-                                "prior to Python 3")
+            pytest.skip("build in round cannot be overriden "
+                        "prior to Python 3")
 
         # GH11763
         # Here's the test frame we'll be working with
@@ -2202,7 +2063,3 @@ class TestDataFrameAnalytics(tm.TestCase, TestData):
 
         with tm.assertRaisesRegexp(ValueError, 'aligned'):
             df.dot(df2)
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

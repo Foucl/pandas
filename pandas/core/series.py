@@ -14,6 +14,7 @@ import numpy as np
 import numpy.ma as ma
 
 from pandas.types.common import (_coerce_to_dtype, is_categorical_dtype,
+                                 is_bool,
                                  is_integer, is_integer_dtype,
                                  is_float_dtype,
                                  is_extension_type, is_datetimetz,
@@ -59,7 +60,7 @@ from pandas.compat import zip, u, OrderedDict, StringIO
 from pandas.compat.numpy import function as nv
 
 import pandas.core.ops as ops
-import pandas.core.algorithms as algos
+import pandas.core.algorithms as algorithms
 
 import pandas.core.common as com
 import pandas.core.nanops as nanops
@@ -67,10 +68,7 @@ import pandas.formats.format as fmt
 from pandas.util.decorators import Appender, deprecate_kwarg, Substitution
 from pandas.util.validators import validate_bool_kwarg
 
-import pandas.lib as lib
-import pandas.tslib as tslib
-import pandas.index as _index
-
+from pandas._libs import index as libindex, tslib as libts, lib, iNaT
 from pandas.core.config import get_option
 
 __all__ = ['Series']
@@ -276,13 +274,6 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
     def _can_hold_na(self):
         return self._data._can_hold_na
 
-    @property
-    def is_time_series(self):
-        warnings.warn("is_time_series is deprecated. Please use "
-                      "Series.index.is_all_dates", FutureWarning, stacklevel=2)
-        # return self._subtyp in ['time_series', 'sparse_time_series']
-        return self.index.is_all_dates
-
     _index = None
 
     def _set_axis(self, axis, labels, fastpath=False):
@@ -300,7 +291,7 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
                     # need to set here becuase we changed the index
                     if fastpath:
                         self._data.set_axis(axis, labels)
-                except (tslib.OutOfBoundsDatetime, ValueError):
+                except (libts.OutOfBoundsDatetime, ValueError):
                     # labels may exceeds datetime bounds,
                     # or not be a DatetimeIndex
                     pass
@@ -377,10 +368,10 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
         Timezone aware datetime data is converted to UTC:
 
         >>> pd.Series(pd.date_range('20130101', periods=3,
-                                    tz='US/Eastern')).values
-        array(['2013-01-01T00:00:00.000000000-0500',
-               '2013-01-02T00:00:00.000000000-0500',
-               '2013-01-03T00:00:00.000000000-0500'], dtype='datetime64[ns]')
+        ...                         tz='US/Eastern')).values
+        array(['2013-01-01T05:00:00.000000000',
+               '2013-01-02T05:00:00.000000000',
+               '2013-01-03T05:00:00.000000000'], dtype='datetime64[ns]')
 
         """
         return self._data.external_values()
@@ -574,7 +565,7 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
             # dispatch to the values if we need
             values = self._values
             if isinstance(values, np.ndarray):
-                return _index.get_value_at(values, i)
+                return libindex.get_value_at(values, i)
             else:
                 return values[i]
         except IndexError:
@@ -588,7 +579,7 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
                 if isinstance(label, Index):
                     return self.take(i, axis=axis, convert=True)
                 else:
-                    return _index.get_value_at(self, i)
+                    return libindex.get_value_at(self, i)
 
     @property
     def _is_mixed_type(self):
@@ -739,7 +730,7 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
                 elif is_timedelta64_dtype(self.dtype):
                     # reassign a null value to iNaT
                     if isnull(value):
-                        value = tslib.iNaT
+                        value = iNaT
 
                         try:
                             self.index._engine.set_value(self._values, key,
@@ -880,31 +871,6 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
             return self
 
         return self._values.reshape(shape, **kwargs)
-
-    def iget_value(self, i, axis=0):
-        """
-        DEPRECATED. Use ``.iloc[i]`` or ``.iat[i]`` instead
-        """
-        warnings.warn("iget_value(i) is deprecated. Please use .iloc[i] or "
-                      ".iat[i]", FutureWarning, stacklevel=2)
-        return self._ixs(i)
-
-    def iget(self, i, axis=0):
-        """
-        DEPRECATED. Use ``.iloc[i]`` or ``.iat[i]`` instead
-        """
-
-        warnings.warn("iget(i) is deprecated. Please use .iloc[i] or .iat[i]",
-                      FutureWarning, stacklevel=2)
-        return self._ixs(i)
-
-    def irow(self, i, axis=0):
-        """
-        DEPRECATED. Use ``.iloc[i]`` or ``.iat[i]`` instead
-        """
-        warnings.warn("irow(i) is deprecated. Please use .iloc[i] or .iat[i]",
-                      FutureWarning, stacklevel=2)
-        return self._ixs(i)
 
     def get_value(self, label, takeable=False):
         """
@@ -1233,7 +1199,7 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
         modes : Series (sorted)
         """
         # TODO: Add option for bins like value_counts()
-        return algos.mode(self)
+        return algorithms.mode(self)
 
     @Appender(base._shared_docs['unique'] % _shared_doc_kwargs)
     def unique(self):
@@ -1455,7 +1421,7 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
         -------
         diffed : Series
         """
-        result = algos.diff(_values_from_object(self), periods)
+        result = algorithms.diff(_values_from_object(self), periods)
         return self._constructor(result, index=self.index).__finalize__(self)
 
     def autocorr(self, lag=1):
@@ -1583,11 +1549,13 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
         With `verify_integrity` set to True:
 
         >>> s1.append(s2, verify_integrity=True)
+        Traceback (most recent call last):
+        ...
         ValueError: Indexes have overlapping values: [0, 1, 2]
 
 
         """
-        from pandas.tools.merge import concat
+        from pandas.tools.concat import concat
 
         if isinstance(to_append, (list, tuple)):
             to_concat = [self] + to_append
@@ -1753,6 +1721,15 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
 
         argsorted = _try_kind_sort(arr[good])
 
+        if is_list_like(ascending):
+            if len(ascending) != 1:
+                raise ValueError('Length of ascending (%d) must be 1 '
+                                 'for Series' % (len(ascending)))
+            ascending = ascending[0]
+
+        if not is_bool(ascending):
+            raise ValueError('ascending must be boolean')
+
         if not ascending:
             argsorted = argsorted[::-1]
 
@@ -1785,12 +1762,12 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
             new_index, indexer = index.sortlevel(level, ascending=ascending,
                                                  sort_remaining=sort_remaining)
         elif isinstance(index, MultiIndex):
-            from pandas.core.groupby import _lexsort_indexer
-            indexer = _lexsort_indexer(index.labels, orders=ascending)
+            from pandas.core.sorting import lexsort_indexer
+            indexer = lexsort_indexer(index.labels, orders=ascending)
         else:
-            from pandas.core.groupby import _nargsort
-            indexer = _nargsort(index, kind=kind, ascending=ascending,
-                                na_position=na_position)
+            from pandas.core.sorting import nargsort
+            indexer = nargsort(index, kind=kind, ascending=ascending,
+                               na_position=na_position)
 
         indexer = _ensure_platform_int(indexer)
         new_index = index.take(indexer)
@@ -1943,10 +1920,22 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
         --------
         >>> import pandas as pd
         >>> import numpy as np
-        >>> s = pd.Series(np.random.randn(1e6))
+        >>> s = pd.Series(np.random.randn(10**6))
         >>> s.nlargest(10)  # only sorts up to the N requested
+        219921    4.644710
+        82124     4.608745
+        421689    4.564644
+        425277    4.447014
+        718691    4.414137
+        43154     4.403520
+        283187    4.313922
+        595519    4.273635
+        503969    4.250236
+        121637    4.240952
+        dtype: float64
         """
-        return algos.select_n_series(self, n=n, keep=keep, method='nlargest')
+        return algorithms.select_n_series(self, n=n, keep=keep,
+                                          method='nlargest')
 
     @deprecate_kwarg('take_last', 'keep', mapping={True: 'last',
                                                    False: 'first'})
@@ -1981,10 +1970,22 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
         --------
         >>> import pandas as pd
         >>> import numpy as np
-        >>> s = pd.Series(np.random.randn(1e6))
+        >>> s = pd.Series(np.random.randn(10**6))
         >>> s.nsmallest(10)  # only sorts up to the N requested
+        288532   -4.954580
+        732345   -4.835960
+        64803    -4.812550
+        446457   -4.609998
+        501225   -4.483945
+        669476   -4.472935
+        973615   -4.401699
+        621279   -4.355126
+        773916   -4.347355
+        359919   -4.331927
+        dtype: float64
         """
-        return algos.select_n_series(self, n=n, keep=keep, method='nsmallest')
+        return algorithms.select_n_series(self, n=n, keep=keep,
+                                          method='nsmallest')
 
     def sortlevel(self, level=0, ascending=True, sort_remaining=True):
         """
@@ -2074,21 +2075,24 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
 
         Examples
         --------
+        >>> s = pd.Series([1, 2, 3, 4],
+        ...     index=pd.MultiIndex.from_product([['one', 'two'], ['a', 'b']]))
         >>> s
-        one  a   1.
-        one  b   2.
-        two  a   3.
-        two  b   4.
+        one  a    1
+             b    2
+        two  a    3
+             b    4
+        dtype: int64
 
         >>> s.unstack(level=-1)
-             a   b
-        one  1.  2.
-        two  3.  4.
+             a  b
+        one  1  2
+        two  3  4
 
         >>> s.unstack(level=0)
            one  two
-        a  1.   2.
-        b  3.   4.
+        a    1    3
+        b    2    4
 
         Returns
         -------
@@ -2120,22 +2124,35 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
         Examples
         --------
 
-        Map inputs to outputs
+        Map inputs to outputs (both of type `Series`)
 
+        >>> x = pd.Series([1,2,3], index=['one', 'two', 'three'])
         >>> x
-        one   1
-        two   2
-        three 3
+        one      1
+        two      2
+        three    3
+        dtype: int64
 
+        >>> y = pd.Series(['foo', 'bar', 'baz'], index=[1,2,3])
         >>> y
-        1  foo
-        2  bar
-        3  baz
+        1    foo
+        2    bar
+        3    baz
 
         >>> x.map(y)
         one   foo
         two   bar
         three baz
+
+        Mapping a dictionary keys on the index labels works similar as
+        with a `Series`:
+
+        >>> z = {1: 'A', 2: 'B', 3: 'C'}
+
+        >>> x.map(z)
+        one   A
+        two   B
+        three C
 
         Use na_action to control whether NA values are affected by the mapping
         function.
@@ -2158,6 +2175,11 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
         3                     NaN
         dtype: object
 
+        See Also
+        --------
+        Series.apply: For applying more complex functions on a Series
+        DataFrame.apply: Apply a function row-/column-wise
+        DataFrame.applymap: Apply a function elementwise on a whole DataFrame
         """
 
         if is_extension_type(self.dtype):
@@ -2180,7 +2202,7 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
                 arg = self._constructor(arg, index=arg.keys())
 
             indexer = arg.index.get_indexer(values)
-            new_values = algos.take_1d(arg._values, indexer)
+            new_values = algorithms.take_1d(arg._values, indexer)
         else:
             new_values = map_f(values, arg)
 
@@ -2220,6 +2242,7 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
         >>> import numpy as np
         >>> series = pd.Series([20, 21, 12], index=['London',
         ... 'New York','Helsinki'])
+        >>> series
         London      20
         New York    21
         Helsinki    12
@@ -2338,7 +2361,7 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
             return self
 
         # be subclass-friendly
-        new_values = algos.take_1d(self.get_values(), indexer)
+        new_values = algorithms.take_1d(self.get_values(), indexer)
         return self._constructor(new_values, index=new_index)
 
     def _needs_reindex_multi(self, axes, method, level):
@@ -2498,7 +2521,7 @@ class Series(base.IndexOpsMixin, strings.StringAccessorMixin,
         dtype: bool
 
         """
-        result = algos.isin(_values_from_object(self), values)
+        result = algorithms.isin(_values_from_object(self), values)
         return self._constructor(result, index=self.index).__finalize__(self)
 
     def between(self, left, right, inclusive=True):
@@ -2983,15 +3006,6 @@ def _sanitize_array(data, index, dtype=None, copy=False,
 
     return subarr
 
-
-# backwards compatiblity
-class TimeSeries(Series):
-    def __init__(self, *args, **kwargs):
-        # deprecation TimeSeries, #10890
-        warnings.warn("TimeSeries is deprecated. Please use Series",
-                      FutureWarning, stacklevel=2)
-
-        super(TimeSeries, self).__init__(*args, **kwargs)
 
 # ----------------------------------------------------------------------
 # Add plotting methods to Series

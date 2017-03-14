@@ -1,5 +1,5 @@
 import numpy as np
-import pandas.lib as lib
+import pandas._libs.lib as lib
 
 from pandas.types.common import (is_number,
                                  is_numeric_dtype,
@@ -58,7 +58,7 @@ def cartesian_product(X):
     if len(X) == 0:
         return []
 
-    lenX = np.fromiter((len(x) for x in X), dtype=int)
+    lenX = np.fromiter((len(x) for x in X), dtype=np.intp)
     cumprodX = np.cumproduct(lenX)
 
     a = np.roll(cumprodX, 1)

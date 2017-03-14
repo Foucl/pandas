@@ -36,8 +36,8 @@ from pandas.tseries import tools
 
 from pandas.util.decorators import Appender
 
-import pandas.lib as lib
-import pandas.parser as _parser
+import pandas._libs.lib as lib
+import pandas.io.libparsers as libparsers
 
 
 # BOM character (byte order mark)
@@ -181,7 +181,7 @@ infer_datetime_format : boolean, default False
     If True and parse_dates is enabled, pandas will attempt to infer the format
     of the datetime strings in the columns, and if it can be inferred, switch
     to a faster method of parsing them. In some cases this can increase the
-    parsing speed by ~5-10x.
+    parsing speed by 5-10x.
 keep_date_col : boolean, default False
     If True and parse_dates specifies combining multiple columns then
     keep the original columns.
@@ -200,10 +200,10 @@ iterator : boolean, default False
     Return TextFileReader object for iteration or getting chunks with
     ``get_chunk()``.
 chunksize : int, default None
-    Return TextFileReader object for iteration. `See IO Tools docs for more
-    information
-    <http://pandas.pydata.org/pandas-docs/stable/io.html#io-chunking>`_ on
-    ``iterator`` and ``chunksize``.
+    Return TextFileReader object for iteration.
+    See the `IO Tools docs
+    <http://pandas.pydata.org/pandas-docs/stable/io.html#io-chunking>`_
+    for more information on ``iterator`` and ``chunksize``.
 compression : {'infer', 'gzip', 'bz2', 'zip', 'xz', None}, default 'infer'
     For on-the-fly decompression of on-disk data. If 'infer', then use gzip,
     bz2, zip or xz if filepath_or_buffer is a string ending in '.gz', '.bz2',
@@ -408,6 +408,7 @@ def _read(filepath_or_buffer, kwds):
         parser.close()
 
     return data
+
 
 _parser_defaults = {
     'delimiter': None,
@@ -654,6 +655,7 @@ def _make_parser_function(name, sep=','):
     parser_f.__name__ = name
 
     return parser_f
+
 
 read_csv = _make_parser_function('read_csv', sep=',')
 read_csv = Appender(_read_csv_doc)(read_csv)
@@ -1413,7 +1415,7 @@ class ParserBase(object):
 
             if issubclass(cvals.dtype.type, np.integer) and self.compact_ints:
                 cvals = lib.downcast_int64(
-                    cvals, _parser.na_values,
+                    cvals, libparsers.na_values,
                     self.use_unsigned)
 
             result[c] = cvals
@@ -1531,7 +1533,7 @@ class CParserWrapper(ParserBase):
         # #2442
         kwds['allow_leading_cols'] = self.index_col is not False
 
-        self._reader = _parser.TextReader(src, **kwds)
+        self._reader = libparsers.TextReader(src, **kwds)
 
         # XXX
         self.usecols, self.usecols_dtype = _validate_usecols_arg(
@@ -2856,7 +2858,7 @@ def _try_convert_dates(parser, colspec, data_dict, columns):
         if c in colset:
             colnames.append(c)
         elif isinstance(c, int) and c not in columns:
-            colnames.append(str(columns[c]))
+            colnames.append(columns[c])
         else:
             colnames.append(c)
 

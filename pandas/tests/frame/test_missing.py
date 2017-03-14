@@ -23,13 +23,11 @@ def _skip_if_no_pchip():
     try:
         from scipy.interpolate import pchip_interpolate  # noqa
     except ImportError:
-        import nose
-        raise nose.SkipTest('scipy.interpolate.pchip missing')
+        import pytest
+        pytest.skip('scipy.interpolate.pchip missing')
 
 
 class TestDataFrameMissingData(tm.TestCase, TestData):
-
-    _multiprocess_can_split_ = True
 
     def test_dropEmptyRows(self):
         N = len(self.frame.index)
@@ -252,6 +250,20 @@ class TestDataFrameMissingData(tm.TestCase, TestData):
         result = df.fillna(value={'Date': df['Date2']})
         assert_frame_equal(result, expected)
 
+    def test_fillna_downcast(self):
+        # GH 15277
+        # infer int64 from float64
+        df = pd.DataFrame({'a': [1., np.nan]})
+        result = df.fillna(0, downcast='infer')
+        expected = pd.DataFrame({'a': [1, 0]})
+        assert_frame_equal(result, expected)
+
+        # infer int64 from float64 when fillna value is a dict
+        df = pd.DataFrame({'a': [1., np.nan]})
+        result = df.fillna({'a': 0}, downcast='infer')
+        expected = pd.DataFrame({'a': [1, 0]})
+        assert_frame_equal(result, expected)
+
     def test_fillna_dtype_conversion(self):
         # make sure that fillna on an empty frame works
         df = DataFrame(index=["A", "B", "C"], columns=[1, 2, 3, 4, 5])
@@ -321,6 +333,40 @@ class TestDataFrameMissingData(tm.TestCase, TestData):
 
         assert_frame_equal(self.tsframe.bfill(),
                            self.tsframe.fillna(method='bfill'))
+
+    def test_frame_pad_backfill_limit(self):
+        index = np.arange(10)
+        df = DataFrame(np.random.randn(10, 4), index=index)
+
+        result = df[:2].reindex(index, method='pad', limit=5)
+
+        expected = df[:2].reindex(index).fillna(method='pad')
+        expected.values[-3:] = np.nan
+        tm.assert_frame_equal(result, expected)
+
+        result = df[-2:].reindex(index, method='backfill', limit=5)
+
+        expected = df[-2:].reindex(index).fillna(method='backfill')
+        expected.values[:3] = np.nan
+        tm.assert_frame_equal(result, expected)
+
+    def test_frame_fillna_limit(self):
+        index = np.arange(10)
+        df = DataFrame(np.random.randn(10, 4), index=index)
+
+        result = df[:2].reindex(index)
+        result = result.fillna(method='pad', limit=5)
+
+        expected = df[:2].reindex(index).fillna(method='pad')
+        expected.values[-3:] = np.nan
+        tm.assert_frame_equal(result, expected)
+
+        result = df[-2:].reindex(index)
+        result = result.fillna(method='backfill', limit=5)
+
+        expected = df[-2:].reindex(index).fillna(method='backfill')
+        expected.values[:3] = np.nan
+        tm.assert_frame_equal(result, expected)
 
     def test_fillna_skip_certain_blocks(self):
         # don't try to fill boolean, int blocks
@@ -502,7 +548,8 @@ class TestDataFrameInterpolate(tm.TestCase, TestData):
             df.interpolate(method='values')
 
     def test_interp_various(self):
-        tm._skip_if_no_scipy()
+        tm.skip_if_no_package('scipy', max_version='0.19.0')
+
         df = DataFrame({'A': [1, 2, np.nan, 4, 5, np.nan, 7],
                         'C': [1, 2, 3, 5, 8, 13, 21]})
         df = df.set_index('C')
@@ -663,10 +710,3 @@ class TestDataFrameInterpolate(tm.TestCase, TestData):
         # all good
         result = df[['B', 'D']].interpolate(downcast=None)
         assert_frame_equal(result, df[['B', 'D']])
-
-
-if __name__ == '__main__':
-    import nose
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   # '--with-coverage', '--cover-package=pandas.core']
-                   exit=False)

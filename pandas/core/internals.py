@@ -53,17 +53,16 @@ from pandas.formats.printing import pprint_thing
 
 import pandas.core.missing as missing
 from pandas.sparse.array import _maybe_to_sparse, SparseArray
-import pandas.lib as lib
-import pandas.tslib as tslib
+from pandas._libs import lib, tslib
+from pandas._libs.tslib import Timedelta
+from pandas._libs.lib import BlockPlacement
+
 import pandas.computation.expressions as expressions
 from pandas.util.decorators import cache_readonly
 from pandas.util.validators import validate_bool_kwarg
 
-from pandas.tslib import Timedelta
 from pandas import compat, _np_version_under1p9
 from pandas.compat import range, map, zip, u
-
-from pandas.lib import BlockPlacement
 
 
 class Block(PandasObject):
@@ -372,6 +371,10 @@ class Block(PandasObject):
         original_value = value
         mask = isnull(self.values)
         if limit is not None:
+            if not is_integer(limit):
+                raise ValueError('Limit must be an integer')
+            if limit < 1:
+                raise ValueError('Limit must be greater than 0')
             if self.ndim > 2:
                 raise NotImplementedError("number of dimensions for 'fillna' "
                                           "is currently limited to 2")
@@ -5122,6 +5125,7 @@ def trim_join_unit(join_unit, length):
 
 
 class JoinUnit(object):
+
     def __init__(self, block, shape, indexers=None):
         # Passing shape explicitly is required for cases when block is None.
         if indexers is None:
@@ -5223,6 +5227,8 @@ class JoinUnit(object):
                 # External code requested filling/upcasting, bool values must
                 # be upcasted to object to avoid being upcasted to numeric.
                 values = self.block.astype(np.object_).values
+            elif self.block.is_categorical:
+                values = self.block.values
             else:
                 # No dtype upcasting is done here, it will be performed during
                 # concatenation itself.

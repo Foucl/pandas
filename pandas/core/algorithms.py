@@ -6,7 +6,7 @@ from __future__ import division
 from warnings import warn
 import numpy as np
 
-from pandas import compat, lib, tslib, _np_version_under1p8
+from pandas import compat, _np_version_under1p8
 from pandas.types.cast import _maybe_promote
 from pandas.types.generic import ABCSeries, ABCIndex
 from pandas.types.common import (is_unsigned_integer_dtype,
@@ -34,10 +34,9 @@ from pandas.compat.numpy import _np_version_under1p10
 from pandas.types.missing import isnull
 
 import pandas.core.common as com
-import pandas.algos as algos
-import pandas.hashtable as htable
 from pandas.compat import string_types
-from pandas.tslib import iNaT
+from pandas._libs import algos, lib, hashtable as htable
+from pandas._libs.tslib import iNaT
 
 
 # --------------- #
@@ -471,8 +470,8 @@ def _value_counts_arraylike(values, dropna=True):
         # dtype handling
         if is_datetimetz_type:
             keys = DatetimeIndex._simple_new(keys, tz=orig.dtype.tz)
-        if is_period_type:
-            keys = PeriodIndex._simple_new(keys, freq=freq)
+        elif is_period_type:
+            keys = PeriodIndex._from_ordinals(keys, freq=freq)
 
     elif is_signed_integer_dtype(dtype):
         values = _ensure_int64(values)
@@ -926,6 +925,7 @@ def _finalize_nsmallest(arr, kth_val, n, keep, narr):
     else:
         return inds
 
+
 _dtype_map = {'datetime64[ns]': 'int64', 'timedelta64[ns]': 'int64'}
 
 
@@ -959,6 +959,7 @@ def _hashtable_algo(f, values, return_dtype=None):
     # use Object
     return f(htable.PyObjectHashTable, _ensure_object)
 
+
 _hashtables = {
     'float64': (htable.Float64HashTable, htable.Float64Vector),
     'uint64': (htable.UInt64HashTable, htable.UInt64Vector),
@@ -971,6 +972,10 @@ _hashtables = {
 def _get_data_algo(values, func_map):
 
     f = None
+
+    if is_categorical_dtype(values):
+        values = values._values_for_rank()
+
     if is_float_dtype(values):
         f = func_map['float64']
         values = _ensure_float64(values)
@@ -1250,7 +1255,7 @@ def take_nd(arr, indexer, axis=0, out=None, fill_value=np.nan, mask_info=None,
         indexer = np.arange(arr.shape[axis], dtype=np.int64)
         dtype, fill_value = arr.dtype, arr.dtype.type()
     else:
-        indexer = _ensure_int64(indexer)
+        indexer = _ensure_int64(indexer, copy=False)
         if not allow_fill:
             dtype, fill_value = arr.dtype, arr.dtype.type()
             mask_info = None, False
@@ -1303,7 +1308,6 @@ def take_nd(arr, indexer, axis=0, out=None, fill_value=np.nan, mask_info=None,
 
     func = _get_take_nd_function(arr.ndim, arr.dtype, out.dtype, axis=axis,
                                  mask_info=mask_info)
-    indexer = _ensure_int64(indexer)
     func(arr, indexer, out, fill_value)
 
     if flip_order:
@@ -1407,7 +1411,7 @@ def diff(arr, n, axis=0):
     if needs_i8_conversion(arr):
         dtype = np.float64
         arr = arr.view('i8')
-        na = tslib.iNaT
+        na = iNaT
         is_timedelta = True
     elif issubclass(dtype.type, np.integer):
         dtype = np.float64

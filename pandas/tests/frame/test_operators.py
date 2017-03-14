@@ -5,7 +5,7 @@ from __future__ import print_function
 from datetime import datetime
 import operator
 
-import nose
+import pytest
 
 from numpy import nan, random
 import numpy as np
@@ -30,8 +30,6 @@ from pandas.tests.frame.common import (TestData, _check_mixed_float,
 
 
 class TestDataFrameOperators(tm.TestCase, TestData):
-
-    _multiprocess_can_split_ = True
 
     def test_operators(self):
         garbage = random.random(4)
@@ -325,7 +323,7 @@ class TestDataFrameOperators(tm.TestCase, TestData):
             self.assertRaises(TypeError, self.frame.__gt__, 'foo')
             self.assertRaises(TypeError, self.frame.__ne__, 'foo')
         else:
-            raise nose.SkipTest('test_logical_typeerror not tested on PY3')
+            pytest.skip('test_logical_typeerror not tested on PY3')
 
     def test_logical_with_nas(self):
         d = DataFrame({'a': [np.nan, False], 'b': [True, True]})
@@ -1275,8 +1273,3 @@ class TestDataFrameOperators(tm.TestCase, TestData):
             align(df, val, 'index')
         with tm.assertRaises(ValueError):
             align(df, val, 'columns')
-
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

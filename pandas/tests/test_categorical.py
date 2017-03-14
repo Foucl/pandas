@@ -26,7 +26,6 @@ from pandas.core.config import option_context
 
 
 class TestCategorical(tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def setUp(self):
         self.factor = Categorical(['a', 'b', 'b', 'a', 'a', 'c', 'c', 'c'],
@@ -683,7 +682,7 @@ class TestCategorical(tm.TestCase):
 
     def test_big_print(self):
         factor = Categorical([0, 1, 2, 0, 1, 2] * 100, ['a', 'b', 'c'],
-                             name='cat', fastpath=True)
+                             fastpath=True)
         expected = ["[a, b, c, a, b, ..., b, c, a, b, c]", "Length: 600",
                     "Categories (3, object): [a, b, c]"]
         expected = "\n".join(expected)
@@ -1555,11 +1554,13 @@ Categories (3, object): [ああああ, いいいいい, ううううううう]""
 
     def test_memory_usage(self):
         cat = pd.Categorical([1, 2, 3])
-        self.assertEqual(cat.nbytes, cat.memory_usage())
-        self.assertEqual(cat.nbytes, cat.memory_usage(deep=True))
+
+        # .categories is an index, so we include the hashtable
+        self.assertTrue(cat.nbytes > 0 and cat.nbytes <= cat.memory_usage())
+        self.assertTrue(cat.nbytes > 0 and
+                        cat.nbytes <= cat.memory_usage(deep=True))
 
         cat = pd.Categorical(['foo', 'foo', 'bar'])
-        self.assertEqual(cat.nbytes, cat.memory_usage())
         self.assertTrue(cat.memory_usage(deep=True) > cat.nbytes)
 
         # sys.getsizeof will call the .memory_usage with
@@ -1572,12 +1573,12 @@ Categories (3, object): [ああああ, いいいいい, ううううううう]""
         # https://github.com/pandas-dev/pandas/issues/14522
 
         c1 = pd.Categorical(['cheese', 'milk', 'apple', 'bread', 'bread'],
-                 categories=['cheese', 'milk', 'apple', 'bread'],
-                 ordered=True)
+                            categories=['cheese', 'milk', 'apple', 'bread'],
+                            ordered=True)
         s1 = pd.Series(c1)
         c2 = pd.Categorical(['cheese', 'milk', 'apple', 'bread', 'bread'],
-                 categories=['cheese', 'milk', 'apple', 'bread'],
-                 ordered=False)
+                            categories=['cheese', 'milk', 'apple', 'bread'],
+                            ordered=False)
         s2 = pd.Series(c2)
 
         # Searching for single item argument, side='left' (default)
@@ -1634,15 +1635,6 @@ Categories (3, object): [ああああ, いいいいい, ううううううう]""
         with tm.assert_produces_warning(FutureWarning):
             Categorical.from_array([0, 1])
 
-    def test_removed_names_produces_warning(self):
-
-        # 10482
-        with tm.assert_produces_warning(UserWarning):
-            Categorical([0, 1], name="a")
-
-        with tm.assert_produces_warning(UserWarning):
-            Categorical.from_codes([1, 2], ["a", "b", "c"], name="a")
-
     def test_datetime_categorical_comparison(self):
         dt_cat = pd.Categorical(
             pd.date_range('2014-01-01', periods=3), ordered=True)
@@ -1695,8 +1687,8 @@ Categories (3, object): [ああああ, いいいいい, ううううううう]""
         tm.assert_index_equal(result, Index(np.array([1] * 5, dtype=np.int64)))
 
     def test_validate_inplace(self):
-        cat = Categorical(['A','B','B','C','A'])
-        invalid_values = [1, "True", [1,2,3], 5.0]
+        cat = Categorical(['A', 'B', 'B', 'C', 'A'])
+        invalid_values = [1, "True", [1, 2, 3], 5.0]
 
         for value in invalid_values:
             with self.assertRaises(ValueError):
@@ -1709,19 +1701,21 @@ Categories (3, object): [ああああ, いいいいい, ううううううう]""
                 cat.as_unordered(inplace=value)
 
             with self.assertRaises(ValueError):
-                cat.set_categories(['X','Y','Z'], rename=True, inplace=value)
+                cat.set_categories(['X', 'Y', 'Z'], rename=True, inplace=value)
 
             with self.assertRaises(ValueError):
-                cat.rename_categories(['X','Y','Z'], inplace=value)
+                cat.rename_categories(['X', 'Y', 'Z'], inplace=value)
 
             with self.assertRaises(ValueError):
-                cat.reorder_categories(['X','Y','Z'], ordered=True, inplace=value)
+                cat.reorder_categories(
+                    ['X', 'Y', 'Z'], ordered=True, inplace=value)
 
             with self.assertRaises(ValueError):
-                cat.add_categories(new_categories=['D','E','F'], inplace=value)
+                cat.add_categories(
+                    new_categories=['D', 'E', 'F'], inplace=value)
 
             with self.assertRaises(ValueError):
-                cat.remove_categories(removals=['D','E','F'], inplace=value)
+                cat.remove_categories(removals=['D', 'E', 'F'], inplace=value)
 
             with self.assertRaises(ValueError):
                 cat.remove_unused_categories(inplace=value)
@@ -1731,7 +1725,6 @@ Categories (3, object): [ああああ, いいいいい, ううううううう]""
 
 
 class TestCategoricalAsBlock(tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def setUp(self):
         self.factor = Categorical(['a', 'b', 'b', 'a', 'a', 'c', 'c', 'c'])
@@ -3043,13 +3036,15 @@ Categories (10, timedelta64[ns]): [0 days 01:00:00 < 1 days 01:00:00 < 2 days 01
             tm.assert_series_equal(res, exp)
 
             # we don't exclude the count of None and sort by counts
-            exp = pd.Series([3, 2, 1], index=pd.CategoricalIndex([np.nan, "a", "b"]))
+            exp = pd.Series(
+                [3, 2, 1], index=pd.CategoricalIndex([np.nan, "a", "b"]))
             res = s.value_counts(dropna=False)
             tm.assert_series_equal(res, exp)
 
             # When we aren't sorting by counts, and np.nan isn't a
             # category, it should be last.
-            exp = pd.Series([2, 1, 3], index=pd.CategoricalIndex(["a", "b", np.nan]))
+            exp = pd.Series(
+                [2, 1, 3], index=pd.CategoricalIndex(["a", "b", np.nan]))
             res = s.value_counts(dropna=False, sort=False)
             tm.assert_series_equal(res, exp)
 
@@ -3701,7 +3696,8 @@ Categories (10, timedelta64[ns]): [0 days 01:00:00 < 1 days 01:00:00 < 2 days 01
         # assign a part of a column with dtype == categorical ->
         # exp_parts_cats_col
         df = orig.copy()
-        df.loc["j":"k", df.columns[0]] = pd.Categorical(["b", "b"], categories=["a", "b"])
+        df.loc["j":"k", df.columns[0]] = pd.Categorical(
+            ["b", "b"], categories=["a", "b"])
         tm.assert_frame_equal(df, exp_parts_cats_col)
 
         with tm.assertRaises(ValueError):
@@ -4011,7 +4007,6 @@ Categories (10, timedelta64[ns]): [0 days 01:00:00 < 1 days 01:00:00 < 2 days 01
         self.assert_index_equal(df['grade'].cat.categories,
                                 dfa['grade'].cat.categories)
 
-
     def test_concat_preserve(self):
 
         # GH 8641  series concat not preserving category dtype
@@ -4040,7 +4035,7 @@ Categories (10, timedelta64[ns]): [0 days 01:00:00 < 1 days 01:00:00 < 2 days 01
         res = pd.concat([df2, df2])
         exp = DataFrame({'A': pd.concat([a, a]),
                          'B': pd.concat([b, b]).astype(
-                                'category', categories=list('cab'))})
+            'category', categories=list('cab'))})
         tm.assert_frame_equal(res, exp)
 
     def test_categorical_index_preserver(self):
@@ -4050,18 +4045,18 @@ Categories (10, timedelta64[ns]): [0 days 01:00:00 < 1 days 01:00:00 < 2 days 01
 
         df2 = DataFrame({'A': a,
                          'B': b.astype('category', categories=list('cab'))
-                        }).set_index('B')
+                         }).set_index('B')
         result = pd.concat([df2, df2])
         expected = DataFrame({'A': pd.concat([a, a]),
                               'B': pd.concat([b, b]).astype(
                                   'category', categories=list('cab'))
-                             }).set_index('B')
+                              }).set_index('B')
         tm.assert_frame_equal(result, expected)
 
         # wrong catgories
         df3 = DataFrame({'A': a,
                          'B': pd.Categorical(b, categories=list('abc'))
-                        }).set_index('B')
+                         }).set_index('B')
         self.assertRaises(TypeError, lambda: pd.concat([df2, df3]))
 
     def test_merge(self):
@@ -4093,9 +4088,12 @@ Categories (10, timedelta64[ns]): [0 days 01:00:00 < 1 days 01:00:00 < 2 days 01
         expected = df.copy()
 
         # object-cat
+        # note that we propogate the category
+        # because we don't have any matching rows
         cright = right.copy()
         cright['d'] = cright['d'].astype('category')
         result = pd.merge(left, cright, how='left', left_on='b', right_on='c')
+        expected['d'] = expected['d'].astype('category', categories=['null'])
         tm.assert_frame_equal(result, expected)
 
         # cat-object
@@ -4389,8 +4387,8 @@ Categories (10, timedelta64[ns]): [0 days 01:00:00 < 1 days 01:00:00 < 2 days 01
             ('decode', ("UTF-8",), {}),
             ('encode', ("UTF-8",), {}),
             ('endswith', ("a",), {}),
-            ('extract', ("([a-z]*) ",), {"expand":False}),
-            ('extract', ("([a-z]*) ",), {"expand":True}),
+            ('extract', ("([a-z]*) ",), {"expand": False}),
+            ('extract', ("([a-z]*) ",), {"expand": True}),
             ('extractall', ("([a-z]*) ",), {}),
             ('find', ("a",), {}),
             ('findall', ("a",), {}),
@@ -4548,8 +4546,6 @@ Categories (10, timedelta64[ns]): [0 days 01:00:00 < 1 days 01:00:00 < 2 days 01
 
 class TestCategoricalSubclassing(tm.TestCase):
 
-    _multiprocess_can_split_ = True
-
     def test_constructor(self):
         sc = tm.SubclassedCategorical(['a', 'b', 'c'])
         self.assertIsInstance(sc, tm.SubclassedCategorical)
@@ -4574,10 +4570,3 @@ class TestCategoricalSubclassing(tm.TestCase):
         self.assertIsInstance(res, tm.SubclassedCategorical)
         exp = Categorical(['A', 'B', 'C'])
         tm.assert_categorical_equal(res, exp)
-
-
-if __name__ == '__main__':
-    import nose
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   # '--with-coverage', '--cover-package=pandas.core']
-                   exit=False)

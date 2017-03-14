@@ -9,9 +9,6 @@ from pandas.tests.indexes.common import Base
 from pandas.compat import (range, lrange, lzip, u,
                            text_type, zip, PY3, PY36)
 import operator
-import os
-
-import nose
 import numpy as np
 
 from pandas import (period_range, date_range, Series,
@@ -27,12 +24,11 @@ import pandas.core.config as cf
 from pandas.tseries.index import _to_m8
 
 import pandas as pd
-from pandas.lib import Timestamp
+from pandas._libs.lib import Timestamp
 
 
 class TestIndex(Base, tm.TestCase):
     _holder = Index
-    _multiprocess_can_split_ = True
 
     def setUp(self):
         self.indices = dict(unicodeIndex=tm.makeUnicodeIndex(100),
@@ -202,6 +198,23 @@ class TestIndex(Base, tm.TestCase):
             expected = pd.Index(array)
             result = pd.Index(ArrayLike(array))
             self.assert_index_equal(result, expected)
+
+    def test_constructor_int_dtype_nan(self):
+        # see gh-15187
+        data = [np.nan]
+        msg = "cannot convert"
+
+        with tm.assertRaisesRegexp(ValueError, msg):
+            Index(data, dtype='int64')
+
+        with tm.assertRaisesRegexp(ValueError, msg):
+            Index(data, dtype='uint64')
+
+        # This, however, should not break
+        # because NaN is float.
+        expected = Float64Index(data)
+        result = Index(data, dtype='float')
+        tm.assert_index_equal(result, expected)
 
     def test_index_ctor_infer_nan_nat(self):
         # GH 13467
@@ -382,15 +395,6 @@ class TestIndex(Base, tm.TestCase):
 
             # with arguments
             ind.view('i8')
-
-    def test_legacy_pickle_identity(self):
-
-        # GH 8431
-        pth = tm.get_data_path()
-        s1 = pd.read_pickle(os.path.join(pth, 's1-0.12.0.pickle'))
-        s2 = pd.read_pickle(os.path.join(pth, 's2-0.12.0.pickle'))
-        self.assertFalse(s1.index.identical(s2.index))
-        self.assertFalse(s1.index.equals(s2.index))
 
     def test_astype(self):
         casted = self.intIndex.astype('i8')
@@ -1796,7 +1800,6 @@ class TestMixedIntIndex(Base, tm.TestCase):
     # (GH 13514)
 
     _holder = Index
-    _multiprocess_can_split_ = True
 
     def setUp(self):
         self.indices = dict(mixedIndex=Index([0, 'a', 1, 'b', 2, 'c']))
@@ -1994,7 +1997,7 @@ class TestMixedIntIndex(Base, tm.TestCase):
         idx = pd.TimedeltaIndex(['1 days', '2 days', '3 days'])
         tm.assert_index_equal(idx.dropna(), idx)
         nanidx = pd.TimedeltaIndex([pd.NaT, '1 days', '2 days',
-                                   '3 days', pd.NaT])
+                                    '3 days', pd.NaT])
         tm.assert_index_equal(nanidx.dropna(), idx)
 
         idx = pd.PeriodIndex(['2012-02', '2012-04', '2012-05'], freq='M')
@@ -2078,8 +2081,3 @@ class TestMixedIntIndex(Base, tm.TestCase):
         res = i2.intersection(i1)
 
         self.assertEqual(len(res), 0)
-
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

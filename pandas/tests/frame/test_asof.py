@@ -1,18 +1,16 @@
 # coding=utf-8
 
-import nose
-
 import numpy as np
-from pandas import DataFrame, date_range
+from pandas import (DataFrame, date_range, Timestamp, Series,
+                    to_datetime)
 
-from pandas.util.testing import assert_frame_equal
+from pandas.util.testing import assert_frame_equal, assert_series_equal
 import pandas.util.testing as tm
 
 from .common import TestData
 
 
 class TestFrameAsof(TestData, tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def setUp(self):
         self.N = N = 50
@@ -67,6 +65,19 @@ class TestFrameAsof(TestData, tm.TestCase):
 
         assert_frame_equal(result, expected)
 
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)
+    def test_missing(self):
+        # GH 15118
+        # no match found - `where` value before earliest date in index
+        N = 10
+        rng = date_range('1/1/1990', periods=N, freq='53s')
+        df = DataFrame({'A': np.arange(N), 'B': np.arange(N)},
+                       index=rng)
+        result = df.asof('1989-12-31')
+
+        expected = Series(index=['A', 'B'], name=Timestamp('1989-12-31'))
+        assert_series_equal(result, expected)
+
+        result = df.asof(to_datetime(['1989-12-31']))
+        expected = DataFrame(index=to_datetime(['1989-12-31']),
+                             columns=['A', 'B'], dtype='float64')
+        assert_frame_equal(result, expected)

@@ -3,7 +3,7 @@
 from warnings import catch_warnings
 import datetime
 import itertools
-import nose
+import pytest
 
 from numpy.random import randn
 import numpy as np
@@ -20,12 +20,10 @@ from pandas.compat import (range, lrange, StringIO, lzip, u, product as
                            cart_product, zip)
 import pandas as pd
 
-import pandas.index as _index
+import pandas._libs.index as _index
 
 
 class TestMultiLevel(tm.TestCase):
-
-    _multiprocess_can_split_ = True
 
     def setUp(self):
 
@@ -1471,7 +1469,7 @@ Thur,Lunch,Yes,51.51,17"""
         df = self.frame.T
         df['foo', 'four'] = 'foo'
 
-        arrays = [np.array(x) for x in zip(*df.columns._tuple_index)]
+        arrays = [np.array(x) for x in zip(*df.columns.values)]
 
         result = df['foo']
         result2 = df.loc[:, 'foo']
@@ -1495,7 +1493,7 @@ Thur,Lunch,Yes,51.51,17"""
         index = MultiIndex.from_tuples(tuples)
         s = Series(randn(8), index=index)
 
-        arrays = [np.array(x) for x in zip(*index._tuple_index)]
+        arrays = [np.array(x) for x in zip(*index.values)]
 
         result = s['qux']
         result2 = s.loc['qux']
@@ -1648,7 +1646,7 @@ Thur,Lunch,Yes,51.51,17"""
             'bar', 'one'), ('bar', 'two')])
         df = DataFrame(np.random.randn(4, 4), index=index, columns=index)
         df['Totals', ''] = df.sum(1)
-        df = df.consolidate()
+        df = df._consolidate()
 
     def test_ix_preserve_names(self):
         result = self.ymd.loc[2000]
@@ -1735,7 +1733,7 @@ Thur,Lunch,Yes,51.51,17"""
     # AMBIGUOUS CASES!
 
     def test_partial_ix_missing(self):
-        raise nose.SkipTest("skipping for now")
+        pytest.skip("skipping for now")
 
         result = self.ymd.loc[2000, 0]
         expected = self.ymd.loc[2000]['A']
@@ -2478,8 +2476,3 @@ Thur,Lunch,Yes,51.51,17"""
                                for r in range(5)])
 
         assert_frame_equal(result, expected)
-
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

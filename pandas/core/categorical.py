@@ -4,9 +4,9 @@ import numpy as np
 from warnings import warn
 import types
 
-from pandas import compat, lib
+from pandas import compat
 from pandas.compat import u, lzip
-import pandas.algos as _algos
+from pandas._libs import lib, algos as libalgos
 
 from pandas.types.generic import ABCSeries, ABCIndexClass, ABCCategoricalIndex
 from pandas.types.missing import isnull, notnull
@@ -231,8 +231,7 @@ class Categorical(PandasObject):
     __array_priority__ = 1000
     _typ = 'categorical'
 
-    def __init__(self, values, categories=None, ordered=False,
-                 name=None, fastpath=False):
+    def __init__(self, values, categories=None, ordered=False, fastpath=False):
 
         self._validate_ordered(ordered)
 
@@ -243,12 +242,6 @@ class Categorical(PandasObject):
                 categories, fastpath=isinstance(categories, ABCIndexClass))
             self._ordered = ordered
             return
-
-        if name is not None:
-            msg = ("the 'name' keyword is removed, use 'name' with consumers "
-                   "of the categorical instead (e.g. 'Series(cat, "
-                   "name=\"something\")'")
-            warn(msg, UserWarning, stacklevel=2)
 
         # sanitize input
         if is_categorical_dtype(values):
@@ -431,7 +424,7 @@ class Categorical(PandasObject):
         return cls(data, **kwargs)
 
     @classmethod
-    def from_codes(cls, codes, categories, ordered=False, name=None):
+    def from_codes(cls, codes, categories, ordered=False):
         """
         Make a Categorical type from codes and categories arrays.
 
@@ -454,12 +447,6 @@ class Categorical(PandasObject):
             categorical. If not given, the resulting categorical will be
             unordered.
         """
-        if name is not None:
-            msg = ("the 'name' keyword is removed, use 'name' with consumers "
-                   "of the categorical instead (e.g. 'Series(cat, "
-                   "name=\"something\")'")
-            warn(msg, UserWarning, stacklevel=2)
-
         try:
             codes = np.asarray(codes, np.int64)
         except:
@@ -601,6 +588,46 @@ class Categorical(PandasObject):
 
     categories = property(fget=_get_categories, fset=_set_categories,
                           doc=_categories_doc)
+
+    def _codes_for_groupby(self, sort):
+        """
+        If sort=False, return a copy of self, coded with categories as
+        returned by .unique(), followed by any categories not appearing in
+        the data. If sort=True, return self.
+
+        This method is needed solely to ensure the categorical index of the
+        GroupBy result has categories in the order of appearance in the data
+        (GH-8868).
+
+        Parameters
+        ----------
+        sort : boolean
+            The value of the sort paramter groupby was called with.
+
+        Returns
+        -------
+        Categorical
+            If sort=False, the new categories are set to the order of
+            appearance in codes (unless ordered=True, in which case the
+            original order is preserved), followed by any unrepresented
+            categories in the original order.
+        """
+
+        # Already sorted according to self.categories; all is fine
+        if sort:
+            return self
+
+        # sort=False should order groups in as-encountered order (GH-8868)
+        cat = self.unique()
+
+        # But for groupby to work, all categories should be present,
+        # including those missing from the data (GH-13179), which .unique()
+        # above dropped
+        cat.add_categories(
+            self.categories[~self.categories.isin(cat.categories)],
+            inplace=True)
+
+        return self.reorder_categories(cat.categories)
 
     _ordered = None
 
@@ -1364,6 +1391,35 @@ class Categorical(PandasObject):
             return self._constructor(values=codes, categories=self.categories,
                                      ordered=self.ordered, fastpath=True)
 
+    def _values_for_rank(self):
+        """
+        For correctly ranking ordered categorical data. See GH#15420
+
+        Ordered categorical data should be ranked on the basis of
+        codes with -1 translated to NaN.
+
+        Returns
+        -------
+        numpy array
+
+        """
+        from pandas import Series
+        if self.ordered:
+            values = self.codes
+            mask = values == -1
+            if mask.any():
+                values = values.astype('float64')
+                values[mask] = np.nan
+        elif self.categories.is_numeric():
+            values = np.array(self)
+        else:
+            #  reorder the categories (so rank can use the float codes)
+            #  instead of passing an object array to rank
+            values = np.array(
+                self.rename_categories(Series(self.categories).rank())
+            )
+        return values
+
     def order(self, inplace=False, ascending=True, na_position='last'):
         """
         DEPRECATED: use :meth:`Categorical.sort_values`. That function
@@ -1748,8 +1804,8 @@ class Categorical(PandasObject):
 
         """
         categories = self.categories
-        r, counts = _algos.groupsort_indexer(self.codes.astype('int64'),
-                                             categories.size)
+        r, counts = libalgos.groupsort_indexer(self.codes.astype('int64'),
+                                               categories.size)
         counts = counts.cumsum()
         result = [r[counts[indexer]:counts[indexer + 1]]
                   for indexer in range(len(counts) - 1)]
@@ -1828,7 +1884,7 @@ class Categorical(PandasObject):
         modes : `Categorical` (sorted)
         """
 
-        import pandas.hashtable as htable
+        import pandas._libs.hashtable as htable
         good = self._codes != -1
         values = sorted(htable.mode_int64(_ensure_int64(self._codes[good])))
         result = self._constructor(values=values, categories=self.categories,
@@ -1853,8 +1909,10 @@ class Categorical(PandasObject):
         # unlike np.unique, unique1d does not sort
         unique_codes = unique1d(self.codes)
         cat = self.copy()
+
         # keep nan in codes
         cat._codes = unique_codes
+
         # exclude nan from indexer for categories
         take_codes = unique_codes[unique_codes != -1]
         if self.ordered:
@@ -1907,7 +1965,7 @@ class Categorical(PandasObject):
         counts = self.value_counts(dropna=False)
         freqs = counts / float(counts.sum())
 
-        from pandas.tools.merge import concat
+        from pandas.tools.concat import concat
         result = concat([counts, freqs], axis=1)
         result.columns = ['counts', 'freqs']
         result.index.name = 'categories'

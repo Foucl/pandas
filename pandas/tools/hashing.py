@@ -1,16 +1,47 @@
 """
 data hash pandas / numpy objects
 """
+import itertools
 
 import numpy as np
-from pandas import _hash, Series, factorize, Categorical, Index
-from pandas.lib import is_bool_array
+from pandas import Series, factorize, Categorical, Index, MultiIndex
+from pandas.tools import libhashing as _hash
+from pandas._libs.lib import is_bool_array
 from pandas.types.generic import ABCIndexClass, ABCSeries, ABCDataFrame
 from pandas.types.common import (is_categorical_dtype, is_numeric_dtype,
-                                 is_datetime64_dtype, is_timedelta64_dtype)
+                                 is_datetime64_dtype, is_timedelta64_dtype,
+                                 is_list_like)
 
 # 16 byte long hashing key
 _default_hash_key = '0123456789123456'
+
+
+def _combine_hash_arrays(arrays, num_items):
+    """
+    Parameters
+    ----------
+    arrays : generator
+    num_items : int
+
+    Should be the same as CPython's tupleobject.c
+    """
+    try:
+        first = next(arrays)
+    except StopIteration:
+        return np.array([], dtype=np.uint64)
+
+    arrays = itertools.chain([first], arrays)
+
+    mult = np.uint64(1000003)
+    out = np.zeros_like(first) + np.uint64(0x345678)
+    for i, a in enumerate(arrays):
+        inverse_i = num_items - i
+        out ^= a
+        out *= mult
+        mult += np.uint64(82520 + inverse_i + inverse_i)
+    assert i + 1 == num_items, 'Fed in wrong num_items'
+    out += np.uint64(97531)
+    return out
 
 
 def hash_pandas_object(obj, index=True, encoding='utf8', hash_key=None,
@@ -41,42 +72,92 @@ def hash_pandas_object(obj, index=True, encoding='utf8', hash_key=None,
     if hash_key is None:
         hash_key = _default_hash_key
 
-    def adder(h, hashed_to_add):
-        h = np.multiply(h, np.uint(3), h)
-        return np.add(h, hashed_to_add, h)
+    if isinstance(obj, MultiIndex):
+        return Series(hash_tuples(obj, encoding, hash_key),
+                      dtype='uint64', copy=False)
 
     if isinstance(obj, ABCIndexClass):
         h = hash_array(obj.values, encoding, hash_key,
-                       categorize).astype('uint64')
-        h = Series(h, index=obj, dtype='uint64')
+                       categorize).astype('uint64', copy=False)
+        h = Series(h, index=obj, dtype='uint64', copy=False)
     elif isinstance(obj, ABCSeries):
         h = hash_array(obj.values, encoding, hash_key,
-                       categorize).astype('uint64')
+                       categorize).astype('uint64', copy=False)
         if index:
-            h = adder(h, hash_pandas_object(obj.index,
-                                            index=False,
-                                            encoding=encoding,
-                                            hash_key=hash_key,
-                                            categorize=categorize).values)
-        h = Series(h, index=obj.index, dtype='uint64')
-    elif isinstance(obj, ABCDataFrame):
-        cols = obj.iteritems()
-        first_series = next(cols)[1]
-        h = hash_array(first_series.values, encoding,
-                       hash_key, categorize).astype('uint64')
-        for _, col in cols:
-            h = adder(h, hash_array(col.values, encoding, hash_key,
-                                    categorize))
-        if index:
-            h = adder(h, hash_pandas_object(obj.index,
-                                            index=False,
-                                            encoding=encoding,
-                                            hash_key=hash_key,
-                                            categorize=categorize).values)
+            index_iter = (hash_pandas_object(obj.index,
+                                             index=False,
+                                             encoding=encoding,
+                                             hash_key=hash_key,
+                                             categorize=categorize).values
+                          for _ in [None])
+            arrays = itertools.chain([h], index_iter)
+            h = _combine_hash_arrays(arrays, 2)
 
-        h = Series(h, index=obj.index, dtype='uint64')
+        h = Series(h, index=obj.index, dtype='uint64', copy=False)
+
+    elif isinstance(obj, ABCDataFrame):
+        hashes = (hash_array(series.values) for _, series in obj.iteritems())
+        num_items = len(obj.columns)
+        if index:
+            index_hash_generator = (hash_pandas_object(obj.index,
+                                                       index=False,
+                                                       encoding=encoding,
+                                                       hash_key=hash_key,
+                                                       categorize=categorize).values  # noqa
+                                    for _ in [None])
+            num_items += 1
+            hashes = itertools.chain(hashes, index_hash_generator)
+        h = _combine_hash_arrays(hashes, num_items)
+
+        h = Series(h, index=obj.index, dtype='uint64', copy=False)
     else:
         raise TypeError("Unexpected type for hashing %s" % type(obj))
+    return h
+
+
+def hash_tuples(vals, encoding='utf8', hash_key=None):
+    """
+    Hash an MultiIndex / list-of-tuples efficiently
+
+    .. versionadded:: 0.20.0
+
+    Parameters
+    ----------
+    vals : MultiIndex, list-of-tuples, or single tuple
+    encoding : string, default 'utf8'
+    hash_key : string key to encode, default to _default_hash_key
+
+    Returns
+    -------
+    ndarray of hashed values array
+    """
+
+    is_tuple = False
+    if isinstance(vals, tuple):
+        vals = [vals]
+        is_tuple = True
+    elif not is_list_like(vals):
+        raise TypeError("must be convertible to a list-of-tuples")
+
+    if not isinstance(vals, MultiIndex):
+        vals = MultiIndex.from_tuples(vals)
+
+    # create a list-of-Categoricals
+    vals = [Categorical(vals.labels[level],
+                        vals.levels[level],
+                        ordered=False,
+                        fastpath=True)
+            for level in range(vals.nlevels)]
+
+    # hash the list-of-ndarrays
+    hashes = (_hash_categorical(cat,
+                                encoding=encoding,
+                                hash_key=hash_key)
+              for cat in vals)
+    h = _combine_hash_arrays(hashes, len(vals))
+    if is_tuple:
+        h = h[0]
+
     return h
 
 
@@ -95,9 +176,26 @@ def _hash_categorical(c, encoding, hash_key):
     -------
     ndarray of hashed values array, same size as len(c)
     """
-    cat_hashed = hash_array(c.categories.values, encoding, hash_key,
-                            categorize=False).astype(np.uint64, copy=False)
-    return c.rename_categories(cat_hashed).astype(np.uint64)
+    hashed = hash_array(c.categories.values, encoding, hash_key,
+                        categorize=False)
+
+    # we have uint64, as we don't directly support missing values
+    # we don't want to use take_nd which will coerce to float
+    # instead, directly construt the result with a
+    # max(np.uint64) as the missing value indicator
+    #
+    # TODO: GH 15362
+
+    mask = c.isnull()
+    if len(hashed):
+        result = hashed.take(c.codes)
+    else:
+        result = np.zeros(len(mask), dtype='uint64')
+
+    if mask.any():
+        result[mask] = np.iinfo(np.uint64).max
+
+    return result
 
 
 def hash_array(vals, encoding='utf8', hash_key=None, categorize=True):
@@ -108,7 +206,7 @@ def hash_array(vals, encoding='utf8', hash_key=None, categorize=True):
 
     Parameters
     ----------
-    vals : ndarray
+    vals : ndarray, Categorical
     encoding : string, default 'utf8'
         encoding for data & key when strings
     hash_key : string key to encode, default to _default_hash_key
@@ -123,6 +221,9 @@ def hash_array(vals, encoding='utf8', hash_key=None, categorize=True):
     1d uint64 numpy array of hash values, same length as the vals
 
     """
+
+    if not hasattr(vals, 'dtype'):
+        raise TypeError("must pass a ndarray-like")
 
     if hash_key is None:
         hash_key = _default_hash_key
@@ -142,9 +243,10 @@ def hash_array(vals, encoding='utf8', hash_key=None, categorize=True):
     # manage it.
     if is_bool_array(vals):
         vals = vals.astype('u8')
-    elif ((is_datetime64_dtype(vals) or
-           is_timedelta64_dtype(vals) or
-           is_numeric_dtype(vals)) and vals.dtype.itemsize <= 8):
+    elif (is_datetime64_dtype(vals) or
+          is_timedelta64_dtype(vals)):
+        vals = vals.view('i8').astype('u8', copy=False)
+    elif (is_numeric_dtype(vals) and vals.dtype.itemsize <= 8):
         vals = vals.view('u{}'.format(vals.dtype.itemsize)).astype('u8')
     else:
         # With repeated values, its MUCH faster to categorize object dtypes,
@@ -156,7 +258,12 @@ def hash_array(vals, encoding='utf8', hash_key=None, categorize=True):
                               ordered=False, fastpath=True)
             return _hash_categorical(cat, encoding, hash_key)
 
-        vals = _hash.hash_object_array(vals, hash_key, encoding)
+        try:
+            vals = _hash.hash_object_array(vals, hash_key, encoding)
+        except TypeError:
+            # we have mixed types
+            vals = _hash.hash_object_array(vals.astype(str).astype(object),
+                                           hash_key, encoding)
 
     # Then, redistribute these 64-bit ints within the space of 64-bit ints
     vals ^= vals >> 30

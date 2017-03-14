@@ -30,8 +30,8 @@ from pandas.util.decorators import Appender
 import pandas as pd
 
 from pandas.io.common import get_filepath_or_buffer, BaseIterator
-from pandas.lib import max_len_string_array, infer_dtype
-from pandas.tslib import NaT, Timestamp
+from pandas._libs.lib import max_len_string_array, infer_dtype
+from pandas._libs.tslib import NaT, Timestamp
 
 _version_error = ("Version of given Stata file is not 104, 105, 108, "
                   "111 (Stata 7SE), 113 (Stata 8/9), 114 (Stata 10/11), "
@@ -458,6 +458,7 @@ conversion range. This may result in a loss of precision in the saved data.
 
 class ValueLabelTypeMismatch(Warning):
     pass
+
 
 value_label_mismatch_doc = """
 Stata value labels (pandas categories) must be strings. Column {0} contains
@@ -2157,9 +2158,15 @@ class StataWriter(StataParser):
             time_stamp = datetime.datetime.now()
         elif not isinstance(time_stamp, datetime.datetime):
             raise ValueError("time_stamp should be datetime type")
-        self._file.write(
-            self._null_terminate(time_stamp.strftime("%d %b %Y %H:%M"))
-        )
+        # GH #13856
+        # Avoid locale-specific month conversion
+        months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
+                  'Sep', 'Oct', 'Nov', 'Dec']
+        month_lookup = {i + 1: month for i, month in enumerate(months)}
+        ts = (time_stamp.strftime("%d ") +
+              month_lookup[time_stamp.month] +
+              time_stamp.strftime(" %Y %H:%M"))
+        self._file.write(self._null_terminate(ts))
 
     def _write_descriptors(self, typlist=None, varlist=None, srtlist=None,
                            fmtlist=None, lbllist=None):

@@ -617,6 +617,7 @@ Assigning a `Categorical` to parts of a column of other types will use the value
     df
     df.dtypes
 
+.. _categorical.merge:
 
 Merging
 ~~~~~~~
@@ -645,6 +646,9 @@ In this case the categories are not the same and so an error is raised:
         print("ValueError: " + str(e))
 
 The same applies to ``df.append(df_different)``.
+
+See also the section on :ref:`merge dtypes<merging.dtypes>` for notes about preserving merge dtypes and performance.
+
 
 .. _categorical.union:
 
@@ -692,6 +696,17 @@ The below raises ``TypeError`` because the categories are ordered and not identi
    In [3]: union_categoricals([a, b])
    Out[3]:
    TypeError: to union ordered Categoricals, all categories must be the same
+
+.. versionadded:: 0.20.0
+
+Ordered categoricals with different categories or orderings can be combined by
+using the ``ignore_ordered=True`` argument.
+
+.. ipython:: python
+
+    a = pd.Categorical(["a", "b", "c"], ordered=True)
+    b = pd.Categorical(["c", "b", "a"], ordered=True)
+    union_categoricals([a, b], ignore_order=True)
 
 ``union_categoricals`` also works with a ``CategoricalIndex``, or ``Series`` containing
 categorical data, but note that the resulting array will always be a plain ``Categorical``

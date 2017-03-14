@@ -7,9 +7,10 @@ import numpy as np
 
 from pandas import (Series, Index, Float64Index, Int64Index, UInt64Index,
                     RangeIndex, MultiIndex, CategoricalIndex, DatetimeIndex,
-                    TimedeltaIndex, PeriodIndex, notnull)
+                    TimedeltaIndex, PeriodIndex, notnull, isnull)
 from pandas.types.common import needs_i8_conversion
 from pandas.util.testing import assertRaisesRegexp
+from pandas._libs.tslib import iNaT
 
 import pandas.util.testing as tm
 
@@ -322,7 +323,7 @@ class Base(object):
 
             if needs_i8_conversion(ind):
                 vals = ind.asi8[[0] * 5]
-                vals[0] = pd.tslib.iNaT
+                vals[0] = iNaT
             else:
                 vals = ind.values[[0] * 5]
                 vals[0] = np.nan
@@ -366,6 +367,26 @@ class Base(object):
         for ind in self.indices.values():
             self.assertEqual(ind.tolist(), list(ind))
 
+    def test_memory_usage(self):
+        for name, index in compat.iteritems(self.indices):
+            result = index.memory_usage()
+            if len(index):
+                index.get_loc(index[0])
+                result2 = index.memory_usage()
+                result3 = index.memory_usage(deep=True)
+
+                # RangeIndex doesn't use a hashtable engine
+                if not isinstance(index, RangeIndex):
+                    self.assertTrue(result2 > result)
+
+                if index.inferred_type == 'object':
+                    self.assertTrue(result3 > result2)
+
+            else:
+
+                # we report 0 for no-length
+                self.assertEqual(result, 0)
+
     def test_argsort(self):
         for k, ind in self.indices.items():
 
@@ -387,7 +408,7 @@ class Base(object):
             # pandas compatibility input validation - the
             # rest already perform separate (or no) such
             # validation via their 'values' attribute as
-            # defined in pandas/indexes/base.py - they
+            # defined in pandas.indexes/base.py - they
             # cannot be changed at the moment due to
             # backwards compatibility concerns
             if isinstance(type(ind), (CategoricalIndex, RangeIndex)):
@@ -476,6 +497,18 @@ class Base(object):
 
         result = i.where(cond)
         tm.assert_index_equal(result, expected)
+
+    def test_where_array_like(self):
+        i = self.create_index()
+
+        _nan = i._na_value
+        cond = [False] + [True] * (len(i) - 1)
+        klasses = [list, tuple, np.array, pd.Series]
+        expected = pd.Index([_nan] + i[1:].tolist(), dtype=i.dtype)
+
+        for klass in klasses:
+            result = i.where(klass(cond))
+            tm.assert_index_equal(result, expected)
 
     def test_setops_errorcases(self):
         for name, idx in compat.iteritems(self.indices):
@@ -804,7 +837,7 @@ class Base(object):
                 if len(index) == 0:
                     continue
                 elif isinstance(index, pd.tseries.base.DatetimeIndexOpsMixin):
-                    values[1] = pd.tslib.iNaT
+                    values[1] = iNaT
                 elif isinstance(index, (Int64Index, UInt64Index)):
                     continue
                 else:
@@ -844,7 +877,7 @@ class Base(object):
                 values = idx.values
 
                 if isinstance(index, pd.tseries.base.DatetimeIndexOpsMixin):
-                    values[1] = pd.tslib.iNaT
+                    values[1] = iNaT
                 elif isinstance(index, (Int64Index, UInt64Index)):
                     continue
                 else:
@@ -859,3 +892,28 @@ class Base(object):
                 expected[1] = True
                 self.assert_numpy_array_equal(idx._isnan, expected)
                 self.assertTrue(idx.hasnans)
+
+    def test_nulls(self):
+        # this is really a smoke test for the methods
+        # as these are adequantely tested for function elsewhere
+
+        for name, index in self.indices.items():
+            if len(index) == 0:
+                self.assert_numpy_array_equal(
+                    index.isnull(), np.array([], dtype=bool))
+            elif isinstance(index, MultiIndex):
+                idx = index.copy()
+                msg = "isnull is not defined for MultiIndex"
+                with self.assertRaisesRegexp(NotImplementedError, msg):
+                    idx.isnull()
+            else:
+
+                if not index.hasnans:
+                    self.assert_numpy_array_equal(
+                        index.isnull(), np.zeros(len(index), dtype=bool))
+                    self.assert_numpy_array_equal(
+                        index.notnull(), np.ones(len(index), dtype=bool))
+                else:
+                    result = isnull(index)
+                    self.assert_numpy_array_equal(index.isnull(), result)
+                    self.assert_numpy_array_equal(index.notnull(), ~result)
